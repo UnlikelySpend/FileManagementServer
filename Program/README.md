@@ -1,33 +1,52 @@
-# File Management System
+# File Management System v2.0 🗂️
 
-A modern web-based file management system with dark/light mode support, containerized with Docker for easy deployment.
+A comprehensive, modern web-based file management system with advanced features including recycle bin, themes, bookmarks, and rich media previews. Built with React and FastAPI, containerized with Docker for easy deployment.
 
-## Features
-- File upload/download
-- File deletion
-- Dark/light mode toggle
-- Responsive UI
-- Real-time file listing
-- Dockerized for easy deployment
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Docker](https://img.shields.io/badge/docker-ready-blue)
 
-## Quick Start with Docker (Recommended)
+## ✨ Features
+
+### Core Functionality
+- 📁 **File Operations** - Upload, download, delete, rename files and folders
+- 📋 **Clipboard Operations** - Cut, copy, paste with keyboard shortcuts (Ctrl+C/X/V)
+- 🔍 **Advanced Search** - Search by name, type, size, date with multiple filters
+- 📦 **Bulk Operations** - Select multiple files for batch operations
+- 🗜️ **ZIP Download** - Download multiple files as a single archive
+
+### Enhanced Features (v2.0)
+- ♻️ **Recycle Bin** - Non-destructive deletion with restore capability
+- 🎨 **Theme System** - 6 beautiful color themes + dark/light mode
+- ⏰ **Recent Files** - Quick access to recently viewed files
+- 📌 **Folder Bookmarks** - Save frequently accessed folders
+- 🎬 **Rich Previews** - View PDFs, videos, audio files, and images
+- 📊 **File Information** - Detailed metadata and file statistics
+
+### UI/UX Features
+- 🎯 Drag & drop file upload
+- 📱 Fully responsive design
+- ⌨️ Keyboard shortcuts support
+- 🔄 Real-time updates
+- 💫 Smooth animations
+- 🎪 Collapsible sidebar
+
+## 🚀 Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose installed on your machine
+- Docker and Docker Compose installed
+- Node.js 18+ (for development)
+- Python 3.9+ (for development)
 
-### Running with Docker
+### Running with Docker (Recommended)
 
-1. Clone the repository and navigate to the project directory:
+1. Clone the repository:
 ```bash
-cd "File Management System Application"
+git clone https://github.com/UnlikelySpend/FileManagementServer.git
+cd FileManagementServer/Program
 ```
 
 2. Build and run with Docker Compose:
-```bash
-docker-compose up --build
-```
-
-Or run in detached mode:
 ```bash
 docker-compose up --build -d
 ```
@@ -35,72 +54,148 @@ docker-compose up --build -d
 3. Access the application:
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
 
 ### Stopping the Application
 ```bash
 docker-compose down
 ```
 
-## Manual Setup (Alternative)
+## 🎨 Available Themes
 
-### Backend
+- 🌊 **Ocean Blue** - Default calming blue theme
+- 🌿 **Forest Green** - Nature-inspired green
+- 💜 **Royal Purple** - Elegant purple theme
+- 🌅 **Sunset Orange** - Warm orange tones
+- 🌸 **Cherry Blossom** - Soft pink theme
+- 🐚 **Tropical Teal** - Vibrant teal colors
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+C | Copy selected files |
+| Ctrl+X | Cut selected files |
+| Ctrl+V | Paste files |
+| Ctrl+A | Select all files |
+| Delete | Delete selected files |
+
+## 📸 Screenshots
+
+### Main Interface
+- Clean, modern file browser with sidebar panels
+- Breadcrumb navigation
+- Advanced search filters
+
+### Features in Action
+- Recycle bin with restore options
+- Theme selector with live preview
+- Rich media file previews
+- Drag-and-drop uploads
+
+## 🛠️ Development
+
+### Backend Setup
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run backend
 cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: .\venv\Scripts\activate
+pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-### Frontend
+### Frontend Setup
 ```bash
-# Install dependencies
+cd frontend
 npm install
-
-# Run frontend
 npm run dev
 ```
 
-## Deployment to Another Machine
-
-1. Copy the entire project folder to the target machine
-
-2. Ensure Docker and Docker Compose are installed on the target machine
-
-3. Navigate to the project directory and run:
-```bash
-docker-compose up --build -d
+### Project Structure
+```
+FileManagementServer/Program/
+├── backend/
+│   ├── main.py          # FastAPI application
+│   ├── requirements.txt # Python dependencies
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/  # React components
+│   │   ├── contexts/    # React contexts
+│   │   └── App.jsx      # Main app component
+│   ├── package.json
+│   └── Dockerfile
+├── docker-compose.yml   # Docker configuration
+├── uploads/            # File storage
+└── recycle_bin/        # Deleted files
 ```
 
-### Production Deployment
+## 🔧 Configuration
 
-For production environments, use the production compose file:
+### Environment Variables
+
+**Backend:**
+- `CORS_ORIGIN` - Frontend URL (default: http://localhost:5173)
+- `UPLOAD_DIR` - Upload directory path
+- `RECYCLE_DIR` - Recycle bin directory
+
+**Frontend:**
+- `VITE_API_URL` - Backend API URL (default: http://localhost:8000)
+
+### Docker Volumes
+- `./uploads:/app/uploads` - Persistent file storage
+- `./frontend/src:/app/src` - Hot reload for development
+
+## 📝 API Documentation
+
+When running, visit http://localhost:8000/docs for interactive API documentation.
+
+### Key Endpoints
+- `GET /files` - List files with sorting and filtering
+- `POST /upload` - Upload single or multiple files
+- `DELETE /files/{path}` - Move file to recycle bin
+- `GET /search` - Advanced search with filters
+- `POST /files/operation` - Copy/move operations
+- `GET /recycle-bin` - List deleted files
+- `POST /recycle-bin/restore` - Restore deleted files
+
+## 🚢 Production Deployment
+
+For production environments:
+
+1. Update environment variables in `.env`
+2. Use production Docker Compose file:
 ```bash
-docker-compose -f docker-compose.prod.yml up --build -d
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
-Create a `.env` file based on `.env.example` with your production settings.
+3. Set up reverse proxy (nginx/Apache)
+4. Configure SSL certificates
+5. Set up backup strategy for uploads
 
-## Environment Variables
+## 🤝 Contributing
 
-- `CORS_ORIGIN`: Frontend URL for CORS configuration (default: http://localhost:5173)
-- `VITE_API_URL`: Backend API URL for frontend (default: http://localhost:8000)
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## Docker Commands
+## 📄 License
 
-- Build images: `docker-compose build`
-- Start containers: `docker-compose up -d`
-- Stop containers: `docker-compose down`
-- View logs: `docker-compose logs -f`
-- Remove volumes: `docker-compose down -v`
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Tech Stack
-- Frontend: React, Chakra UI, Vite
-- Backend: FastAPI, Python
-- Container: Docker, Docker Compose
-- File Operations: Python aiofiles 
+## 🙏 Acknowledgments
+
+- Built with [React](https://reactjs.org/) and [FastAPI](https://fastapi.tiangolo.com/)
+- UI components from [Chakra UI](https://chakra-ui.com/)
+- Icons from [React Icons](https://react-icons.github.io/react-icons/)
+- Containerized with [Docker](https://www.docker.com/)
+
+## 📞 Support
+
+For issues and feature requests, please use the [GitHub Issues](https://github.com/UnlikelySpend/FileManagementServer/issues) page.
+
+---
+
+**Current Version:** 2.0.0 | **Last Updated:** January 2025
