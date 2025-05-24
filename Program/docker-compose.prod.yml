@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: file-manager-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+    environment:
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:5173}
+    networks:
+      - file-manager-network
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    container_name: file-manager-frontend
+    ports:
+      - "80:5173"
+    environment:
+      - VITE_API_URL=${API_URL:-http://localhost:8000}
+    depends_on:
+      - backend
+    networks:
+      - file-manager-network
+    restart: always
+
+networks:
+  file-manager-network:
+    driver: bridge
+
+volumes:
+  uploads_data:
+    driver: local
