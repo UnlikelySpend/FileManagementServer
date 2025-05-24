@@ -57,11 +57,18 @@ import {
   DragHandleIcon,
   ArrowUpIcon,
   ArrowDownIcon,
-  AttachmentIcon
+  AttachmentIcon,
+  ChevronLeftIcon,
+  ChevronDownIcon
 } from '@chakra-ui/icons'
 import { FaFolder, FaFile, FaImage } from 'react-icons/fa'
 import axios from 'axios'
 import FileViewer from './FileViewer'
+import RecentFiles from './RecentFiles'
+import RecycleBin from './RecycleBin'
+import FolderBookmarks from './FolderBookmarks'
+import AdvancedSearch from './AdvancedSearch'
+import { useClipboard } from '../contexts/ClipboardContext'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -77,10 +84,15 @@ export default function EnhancedFileManager() {
   const [sortOrder, setSortOrder] = useState('asc')
   const [viewMode, setViewMode] = useState('list') // 'list' or 'grid'
   const [loading, setLoading] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [isSearchMode, setIsSearchMode] = useState(false)
+  const [searchResults, setSearchResults] = useState([])
+  const [activeFilters, setActiveFilters] = useState(null)
   
   const { isOpen: isViewerOpen, onOpen: onViewerOpen, onClose: onViewerClose } = useDisclosure()
   const { isOpen: isFolderOpen, onOpen: onFolderOpen, onClose: onFolderClose } = useDisclosure()
   const { isOpen: isOperationOpen, onOpen: onOperationOpen, onClose: onOperationClose } = useDisclosure()
+  const { isOpen: isAdvancedSearchOpen, onOpen: onAdvancedSearchOpen, onClose: onAdvancedSearchClose } = useDisclosure()
   
   const [newFolderName, setNewFolderName] = useState('')
   const [operation, setOperation] = useState({ type: '', destination: '' })
@@ -88,6 +100,7 @@ export default function EnhancedFileManager() {
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
   const toast = useToast()
+  const { clipboard, copyFiles, cutFiles, canPaste, hasClipboardContent } = useClipboard()
   
   const dragBg = useColorModeValue('blue.50', 'blue.900')
   const borderColor = useColorModeValue('gray.200', 'gray.600')
@@ -97,16 +110,26 @@ export default function EnhancedFileManager() {
   const fetchFiles = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await axios.get(`${API_URL}/files`, {
-        params: {
-          path: currentPath,
-          search: searchQuery,
-          sort_by: sortBy,
-          sort_order: sortOrder
-        }
-      })
-      setFiles(response.data.files)
-      setBreadcrumbs(response.data.breadcrumbs)
+      if (isSearchMode && activeFilters) {
+        // Use advanced search
+        const response = await axios.get(`${API_URL}/search`, {
+          params: activeFilters
+        })
+        setSearchResults(response.data.files)
+        setFiles(response.data.files)
+      } else {
+        // Use regular file listing
+        const response = await axios.get(`${API_URL}/files`, {
+          params: {
+            path: currentPath,
+            search: searchQuery,
+            sort_by: sortBy,
+            sort_order: sortOrder
+          }
+        })
+        setFiles(response.data.files)
+        setBreadcrumbs(response.data.breadcrumbs)
+      }
     } catch (error) {
       toast({
         title: 'Error fetching files',
@@ -117,7 +140,7 @@ export default function EnhancedFileManager() {
     } finally {
       setLoading(false)
     }
-  }, [currentPath, searchQuery, sortBy, sortOrder, toast])
+  }, [currentPath, searchQuery, sortBy, sortOrder, isSearchMode, activeFilters, toast])
 
   useEffect(() => {
     fetchFiles()
@@ -135,13 +158,19 @@ export default function EnhancedFileManager() {
           case 'c':
             if (selectedFiles.size > 0) {
               e.preventDefault()
-              handleOperation('copy')
+              copyFiles(Array.from(selectedFiles), currentPath)
             }
             break
           case 'x':
             if (selectedFiles.size > 0) {
               e.preventDefault()
-              handleOperation('move')
+              cutFiles(Array.from(selectedFiles), currentPath)
+            }
+            break
+          case 'v':
+            if (canPaste(currentPath)) {
+              e.preventDefault()
+              handlePaste()
             }
             break
           case 'Delete':
@@ -156,7 +185,7 @@ export default function EnhancedFileManager() {
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-  }, [selectedFiles])
+  }, [selectedFiles, currentPath, canPaste])
 
   const handleFileUpload = async (files) => {
     for (const file of files) {
@@ -282,6 +311,33 @@ export default function EnhancedFileManager() {
     onViewerOpen()
   }
 
+  const handleFileSelect = (file) => {
+    setViewerFile(file)
+    onViewerOpen()
+  }
+
+  const handleFolderNavigate = (folderPath) => {
+    setCurrentPath(folderPath)
+    setSelectedFiles(new Set())
+    setIsSearchMode(false) // Exit search mode when navigating
+    setActiveFilters(null)
+  }
+
+  const handleAdvancedSearch = (filters) => {
+    setActiveFilters(filters)
+    setIsSearchMode(true)
+    setCurrentPath('') // Clear current path for search
+    setSelectedFiles(new Set())
+  }
+
+  const clearSearch = () => {
+    setIsSearchMode(false)
+    setActiveFilters(null)
+    setSearchResults([])
+    setSearchQuery('')
+    setSelectedFiles(new Set())
+  }
+
   const navigateToFolder = (folderPath) => {
     setCurrentPath(folderPath)
     setSelectedFiles(new Set())
@@ -333,6 +389,35 @@ export default function EnhancedFileManager() {
       toast({
         title: 'Failed to create folder',
         description: error.message,
+        status: 'error',
+        duration: 3000,
+      })
+    }
+  }
+
+  const handlePaste = async () => {
+    if (!canPaste(currentPath)) return
+
+    try {
+      const response = await axios.post(`${API_URL}/files/operation`, {
+        files: clipboard.files,
+        operation: clipboard.operation === 'cut' ? 'move' : 'copy',
+        destination: currentPath
+      })
+      
+      toast({
+        title: 'Paste completed',
+        description: response.data.message,
+        status: 'success',
+        duration: 2000,
+      })
+      
+      fetchFiles()
+      setSelectedFiles(new Set())
+    } catch (error) {
+      toast({
+        title: 'Paste failed',
+        description: error.response?.data?.detail || error.message,
         status: 'error',
         duration: 3000,
       })
@@ -392,9 +477,39 @@ export default function EnhancedFileManager() {
   }
 
   return (
-    <VStack spacing={4} align="stretch" h="full">
-      {/* Header */}
-      <HStack spacing={4}>
+    <HStack spacing={4} align="stretch" h="full">
+      {/* Sidebar */}
+      {!sidebarCollapsed && (
+        <VStack spacing={4} align="stretch" h="100%" minH="600px">
+          <FolderBookmarks 
+            currentPath={currentPath}
+            onFolderNavigate={handleFolderNavigate}
+          />
+          <RecentFiles 
+            onFileSelect={handleFileSelect}
+            onFolderNavigate={handleFolderNavigate}
+          />
+          <RecycleBin onRefresh={fetchFiles} />
+        </VStack>
+      )}
+      
+      {/* Sidebar Toggle */}
+      <Box>
+        <Tooltip label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
+          <IconButton
+            icon={sidebarCollapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            variant="ghost"
+            size="sm"
+            aria-label="Toggle sidebar"
+          />
+        </Tooltip>
+      </Box>
+
+      {/* Main Content */}
+      <VStack spacing={4} align="stretch" flex="1" h="full">
+        {/* Header */}
+        <HStack spacing={4}>
         <InputGroup maxW="400px">
           <InputLeftElement pointerEvents="none">
             <SearchIcon color="gray.300" />
@@ -417,6 +532,25 @@ export default function EnhancedFileManager() {
           onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
           aria-label="Toggle sort order"
         />
+        
+        <Button
+          leftIcon={<SearchIcon />}
+          onClick={onAdvancedSearchOpen}
+          colorScheme="purple"
+          variant="outline"
+        >
+          Advanced Search
+        </Button>
+        
+        {isSearchMode && (
+          <Button
+            onClick={clearSearch}
+            colorScheme="gray"
+            variant="outline"
+          >
+            Clear Search
+          </Button>
+        )}
         
         <Button
           leftIcon={<AddIcon />}
@@ -459,6 +593,17 @@ export default function EnhancedFileManager() {
           Upload Folder
         </Button>
         
+        {canPaste(currentPath) && (
+          <Button
+            leftIcon={<AttachmentIcon />}
+            onClick={handlePaste}
+            colorScheme="purple"
+            variant="outline"
+          >
+            Paste ({clipboard.files.length})
+          </Button>
+        )}
+        
         {selectedFiles.size > 0 && (
           <>
             <Button
@@ -481,11 +626,11 @@ export default function EnhancedFileManager() {
                 More Actions
               </MenuButton>
               <MenuList>
-                <MenuItem icon={<CopyIcon />} onClick={() => handleOperation('copy')}>
+                <MenuItem icon={<CopyIcon />} onClick={() => copyFiles(Array.from(selectedFiles), currentPath)}>
                   Copy
                 </MenuItem>
-                <MenuItem icon={<DragHandleIcon />} onClick={() => handleOperation('move')}>
-                  Move
+                <MenuItem icon={<DragHandleIcon />} onClick={() => cutFiles(Array.from(selectedFiles), currentPath)}>
+                  Cut
                 </MenuItem>
               </MenuList>
             </Menu>
@@ -493,19 +638,71 @@ export default function EnhancedFileManager() {
         )}
       </HStack>
 
-      {/* Breadcrumbs */}
-      <Breadcrumb separator={<ChevronRightIcon color="gray.500" />}>
-        <BreadcrumbItem>
-          <BreadcrumbLink onClick={() => setCurrentPath('')}>Home</BreadcrumbLink>
-        </BreadcrumbItem>
-        {breadcrumbs.map((crumb, index) => (
-          <BreadcrumbItem key={index}>
-            <BreadcrumbLink onClick={() => navigateToBreadcrumb(index)}>
-              {crumb}
-            </BreadcrumbLink>
+      {/* Breadcrumbs or Search Results Header */}
+      {isSearchMode ? (
+        <Box>
+          <HStack spacing={4} mb={2}>
+            <Text fontWeight="bold" fontSize="lg">
+              Search Results
+            </Text>
+            {activeFilters && (
+              <Badge colorScheme="blue">
+                {files.length} file{files.length !== 1 ? 's' : ''} found
+              </Badge>
+            )}
+          </HStack>
+          {activeFilters && (
+            <HStack spacing={2} flexWrap="wrap">
+              {activeFilters.query && (
+                <Badge variant="outline">Query: "{activeFilters.query}"</Badge>
+              )}
+              {activeFilters.file_type && (
+                <Badge variant="outline" colorScheme="purple">
+                  Type: {activeFilters.file_type}
+                </Badge>
+              )}
+              {activeFilters.min_size > 0 && (
+                <Badge variant="outline" colorScheme="green">
+                  Min: {Math.round(activeFilters.min_size / (1024 * 1024))}MB
+                </Badge>
+              )}
+              {activeFilters.max_size > 0 && (
+                <Badge variant="outline" colorScheme="red">
+                  Max: {Math.round(activeFilters.max_size / (1024 * 1024))}MB
+                </Badge>
+              )}
+              {activeFilters.date_from && (
+                <Badge variant="outline" colorScheme="orange">
+                  From: {activeFilters.date_from}
+                </Badge>
+              )}
+              {activeFilters.date_to && (
+                <Badge variant="outline" colorScheme="orange">
+                  To: {activeFilters.date_to}
+                </Badge>
+              )}
+              {!activeFilters.recursive && (
+                <Badge variant="outline" colorScheme="gray">
+                  Current folder only
+                </Badge>
+              )}
+            </HStack>
+          )}
+        </Box>
+      ) : (
+        <Breadcrumb separator={<ChevronRightIcon color="gray.500" />}>
+          <BreadcrumbItem>
+            <BreadcrumbLink onClick={() => setCurrentPath('')}>Home</BreadcrumbLink>
           </BreadcrumbItem>
-        ))}
-      </Breadcrumb>
+          {breadcrumbs.map((crumb, index) => (
+            <BreadcrumbItem key={index}>
+              <BreadcrumbLink onClick={() => navigateToBreadcrumb(index)}>
+                {crumb}
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+          ))}
+        </Breadcrumb>
+      )}
 
       {/* File List */}
       <Box
@@ -725,6 +922,15 @@ export default function EnhancedFileManager() {
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </VStack>
+
+      {/* Advanced Search Modal */}
+      <AdvancedSearch
+        isOpen={isAdvancedSearchOpen}
+        onClose={onAdvancedSearchClose}
+        onSearch={handleAdvancedSearch}
+        currentPath={currentPath}
+      />
+      </VStack>
+    </HStack>
   )
 }

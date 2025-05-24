@@ -13,6 +13,7 @@ import zipfile
 import io
 from pathlib import Path
 import json
+import time
 
 app = FastAPI()
 
@@ -25,7 +26,43 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = "uploads"
+RECYCLE_DIR = "recycle_bin"
+RECENT_FILES_DB = "recent_files.json"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(RECYCLE_DIR, exist_ok=True)
+
+# Initialize recent files database
+def load_recent_files():
+    if os.path.exists(RECENT_FILES_DB):
+        try:
+            with open(RECENT_FILES_DB, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_recent_files(recent_files):
+    with open(RECENT_FILES_DB, 'w') as f:
+        json.dump(recent_files, f)
+
+def add_to_recent_files(file_path, file_name, file_type):
+    recent_files = load_recent_files()
+    
+    # Remove if already exists
+    recent_files = [f for f in recent_files if f['path'] != file_path]
+    
+    # Add to beginning
+    recent_files.insert(0, {
+        'path': file_path,
+        'name': file_name,
+        'type': file_type,
+        'accessed_at': int(time.time())
+    })
+    
+    # Keep only last 20 files
+    recent_files = recent_files[:20]
+    
+    save_recent_files(recent_files)
 
 # Text file extensions that can be edited
 EDITABLE_EXTENSIONS = {'.txt', '.md', '.json', '.xml', '.csv', '.html', '.css', '.js', '.py', '.java', '.cpp', '.c', '.h', '.yml', '.yaml', '.ini', '.conf', '.log'}
@@ -63,6 +100,9 @@ class FileOperation(BaseModel):
     destination: str
 
 class BulkDelete(BaseModel):
+    files: List[str]
+
+class RestoreFiles(BaseModel):
     files: List[str]
 
 @app.get("/files")
@@ -129,6 +169,173 @@ async def list_files(
         "breadcrumbs": path.split("/") if path else []
     }
 
+@app.get("/search")
+async def advanced_search(
+    query: str = Query("", description="Search query"),
+    file_type: str = Query("", description="File type filter: image, video, audio, document, archive"),
+    min_size: int = Query(0, description="Minimum file size in bytes"),
+    max_size: int = Query(0, description="Maximum file size in bytes (0 = no limit)"),
+    date_from: str = Query("", description="Modified after date (YYYY-MM-DD)"),
+    date_to: str = Query("", description="Modified before date (YYYY-MM-DD)"),
+    path: str = Query("", description="Search within specific path"),
+    recursive: bool = Query(True, description="Search subdirectories"),
+    sort_by: str = Query("name", description="Sort by: name, size, modified"),
+    sort_order: str = Query("asc", description="Sort order: asc or desc")
+):
+    import datetime
+    
+    def matches_file_type(filename, mime_type, target_type):
+        if not target_type:
+            return True
+            
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+        
+        type_mappings = {
+            'image': (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'], ['image/']),
+            'video': (['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'], ['video/']),
+            'audio': (['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'wma'], ['audio/']),
+            'document': (['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'], ['application/pdf', 'text/']),
+            'archive': (['zip', 'rar', '7z', 'tar', 'gz'], ['application/zip', 'application/x-'])
+        }
+        
+        if target_type in type_mappings:
+            extensions, mime_prefixes = type_mappings[target_type]
+            return (ext in extensions or 
+                   any(mime_type.startswith(prefix) for prefix in mime_prefixes if mime_type))
+        
+        return True
+    
+    def matches_date_range(file_time, date_from_str, date_to_str):
+        if not date_from_str and not date_to_str:
+            return True
+            
+        try:
+            file_date = datetime.datetime.fromtimestamp(file_time).date()
+            
+            if date_from_str:
+                date_from = datetime.datetime.strptime(date_from_str, '%Y-%m-%d').date()
+                if file_date < date_from:
+                    return False
+                    
+            if date_to_str:
+                date_to = datetime.datetime.strptime(date_to_str, '%Y-%m-%d').date()
+                if file_date > date_to:
+                    return False
+                    
+            return True
+        except (ValueError, OSError):
+            return True
+    
+    def search_directory(dir_path, relative_path=""):
+        results = []
+        
+        try:
+            for item in os.listdir(dir_path):
+                if item.startswith('.'):
+                    continue
+                    
+                item_path = os.path.join(dir_path, item)
+                item_relative = os.path.join(relative_path, item) if relative_path else item
+                
+                try:
+                    stats = os.stat(item_path)
+                    is_dir = os.path.isdir(item_path)
+                    
+                    # Get MIME type
+                    mime_type, _ = mimetypes.guess_type(item_path)
+                    
+                    # Check search query match
+                    if query and query.lower() not in item.lower():
+                        if recursive and is_dir:
+                            results.extend(search_directory(item_path, item_relative))
+                        continue
+                    
+                    # Check file type filter (only for files)
+                    if not is_dir and not matches_file_type(item, mime_type, file_type):
+                        continue
+                    
+                    # Check size filter (only for files)
+                    if not is_dir:
+                        if min_size > 0 and stats.st_size < min_size:
+                            continue
+                        if max_size > 0 and stats.st_size > max_size:
+                            continue
+                    
+                    # Check date filter
+                    if not matches_date_range(stats.st_mtime, date_from, date_to):
+                        continue
+                    
+                    # Calculate size
+                    if is_dir:
+                        size = calculate_folder_size(item_path)
+                    else:
+                        size = stats.st_size
+                    
+                    # Check if it's an image
+                    is_image = False
+                    if not is_dir and mime_type:
+                        is_image = mime_type.startswith('image/')
+                    
+                    file_info = {
+                        "name": item,
+                        "path": item_relative.replace("\\", "/"),
+                        "type": "directory" if is_dir else "file",
+                        "size": size,
+                        "modified": stats.st_mtime,
+                        "isImage": is_image,
+                        "mimeType": mime_type
+                    }
+                    
+                    results.append(file_info)
+                    
+                    # Recursively search subdirectories
+                    if recursive and is_dir:
+                        results.extend(search_directory(item_path, item_relative))
+                        
+                except (OSError, PermissionError):
+                    continue
+                    
+        except (OSError, PermissionError):
+            pass
+            
+        return results
+    
+    # Set up search path
+    search_path = os.path.join(UPLOAD_DIR, path.strip("/")) if path else UPLOAD_DIR
+    if not os.path.exists(search_path):
+        return {"files": [], "query": query, "total": 0}
+    
+    # Perform search
+    files = search_directory(search_path)
+    
+    # Sort results
+    reverse = sort_order == "desc"
+    if sort_by == "size":
+        files.sort(key=lambda x: x["size"], reverse=reverse)
+    elif sort_by == "modified":
+        files.sort(key=lambda x: x["modified"], reverse=reverse)
+    else:  # name
+        files.sort(key=lambda x: x["name"].lower(), reverse=reverse)
+    
+    # Always put directories first when sorting by name
+    if sort_by == "name":
+        files.sort(key=lambda x: x["type"] != "directory")
+    
+    return {
+        "files": files,
+        "query": query,
+        "total": len(files),
+        "filters": {
+            "file_type": file_type,
+            "min_size": min_size,
+            "max_size": max_size,
+            "date_from": date_from,
+            "date_to": date_to,
+            "path": path,
+            "recursive": recursive
+        }
+    }
+
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -192,11 +399,28 @@ async def upload_folder(
 async def delete_file(file_path: str):
     full_path = os.path.join(UPLOAD_DIR, file_path)
     if os.path.exists(full_path):
-        if os.path.isdir(full_path):
-            shutil.rmtree(full_path)
-        else:
-            os.remove(full_path)
-        return {"message": f"Successfully deleted {file_path}"}
+        # Move to recycle bin instead of permanent deletion
+        import time
+        timestamp = int(time.time())
+        recycled_name = f"{timestamp}_{os.path.basename(file_path)}"
+        recycle_path = os.path.join(RECYCLE_DIR, recycled_name)
+        
+        # Store original path info
+        metadata = {
+            "original_path": file_path,
+            "deleted_at": timestamp,
+            "original_name": os.path.basename(file_path)
+        }
+        
+        shutil.move(full_path, recycle_path)
+        
+        # Save metadata
+        metadata_path = f"{recycle_path}.meta"
+        with open(metadata_path, 'w') as f:
+            import json
+            json.dump(metadata, f)
+        
+        return {"message": f"Successfully moved {file_path} to recycle bin"}
     raise HTTPException(status_code=404, detail="File not found")
 
 @app.get("/download/{file_path:path}")
@@ -236,6 +460,9 @@ async def get_file_content(file_path: str):
     path = os.path.join(UPLOAD_DIR, file_path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
+    
+    # Add to recent files
+    add_to_recent_files(file_path, os.path.basename(file_path), "file")
     
     mime_type, _ = mimetypes.guess_type(file_path)
     file_ext = os.path.splitext(file_path)[1].lower()
@@ -305,18 +532,36 @@ async def bulk_delete(bulk: BulkDelete):
     for file_path in bulk.files:
         full_path = os.path.join(UPLOAD_DIR, file_path.strip("/"))
         try:
-            if os.path.isdir(full_path):
-                shutil.rmtree(full_path)
-            elif os.path.exists(full_path):
-                os.remove(full_path)
-            deleted.append(file_path)
+            if os.path.exists(full_path):
+                # Move to recycle bin instead of permanent deletion
+                import time
+                timestamp = int(time.time())
+                recycled_name = f"{timestamp}_{os.path.basename(file_path.strip('/'))}"
+                recycle_path = os.path.join(RECYCLE_DIR, recycled_name)
+                
+                # Store original path info
+                metadata = {
+                    "original_path": file_path.strip("/"),
+                    "deleted_at": timestamp,
+                    "original_name": os.path.basename(file_path.strip("/"))
+                }
+                
+                shutil.move(full_path, recycle_path)
+                
+                # Save metadata
+                metadata_path = f"{recycle_path}.meta"
+                with open(metadata_path, 'w') as f:
+                    import json
+                    json.dump(metadata, f)
+                
+                deleted.append(file_path)
         except Exception as e:
             errors.append({"file": file_path, "error": str(e)})
     
     return {
         "deleted": deleted,
         "errors": errors,
-        "message": f"Deleted {len(deleted)} items"
+        "message": f"Moved {len(deleted)} items to recycle bin"
     }
 
 @app.post("/files/operation")
@@ -391,4 +636,165 @@ async def get_thumbnail(file_path: str, size: int = Query(200, description="Thum
     
     # For now, return the original image
     # In production, you'd want to use PIL/Pillow to create actual thumbnails
-    return FileResponse(full_path, media_type=f"image/{ext[1:]}") 
+    return FileResponse(full_path, media_type=f"image/{ext[1:]}")
+
+# Recycle Bin Endpoints
+@app.get("/recycle-bin")
+async def list_recycle_bin():
+    """List all files in recycle bin"""
+    try:
+        recycled_items = []
+        for item in os.listdir(RECYCLE_DIR):
+            if item.endswith('.meta'):
+                continue
+                
+            item_path = os.path.join(RECYCLE_DIR, item)
+            meta_path = f"{item_path}.meta"
+            
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r') as f:
+                    import json
+                    metadata = json.load(f)
+                
+                stats = os.stat(item_path)
+                recycled_items.append({
+                    "recycled_name": item,
+                    "original_name": metadata["original_name"],
+                    "original_path": metadata["original_path"],
+                    "deleted_at": metadata["deleted_at"],
+                    "size": stats.st_size,
+                    "type": "directory" if os.path.isdir(item_path) else "file"
+                })
+        
+        # Sort by deletion time (newest first)
+        recycled_items.sort(key=lambda x: x["deleted_at"], reverse=True)
+        return {"items": recycled_items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/recycle-bin/restore")
+async def restore_files(restore_data: RestoreFiles):
+    """Restore files from recycle bin"""
+    restored = []
+    errors = []
+    
+    for recycled_name in restore_data.files:
+        try:
+            recycle_path = os.path.join(RECYCLE_DIR, recycled_name)
+            meta_path = f"{recycle_path}.meta"
+            
+            if not os.path.exists(recycle_path) or not os.path.exists(meta_path):
+                errors.append({"file": recycled_name, "error": "File not found in recycle bin"})
+                continue
+            
+            with open(meta_path, 'r') as f:
+                import json
+                metadata = json.load(f)
+            
+            # Restore to original location
+            original_path = os.path.join(UPLOAD_DIR, metadata["original_path"])
+            original_dir = os.path.dirname(original_path)
+            
+            # Create directories if they don't exist
+            if original_dir:
+                os.makedirs(original_dir, exist_ok=True)
+            
+            # Check if file already exists at original location
+            if os.path.exists(original_path):
+                # Add timestamp to avoid conflicts
+                base, ext = os.path.splitext(original_path)
+                import time
+                timestamp = int(time.time())
+                original_path = f"{base}_restored_{timestamp}{ext}"
+            
+            shutil.move(recycle_path, original_path)
+            os.remove(meta_path)  # Remove metadata file
+            
+            restored.append({
+                "recycled_name": recycled_name,
+                "restored_to": os.path.relpath(original_path, UPLOAD_DIR)
+            })
+            
+        except Exception as e:
+            errors.append({"file": recycled_name, "error": str(e)})
+    
+    return {
+        "restored": restored,
+        "errors": errors,
+        "message": f"Restored {len(restored)} items"
+    }
+
+@app.delete("/recycle-bin/empty")
+async def empty_recycle_bin():
+    """Permanently delete all files in recycle bin"""
+    try:
+        deleted_count = 0
+        for item in os.listdir(RECYCLE_DIR):
+            item_path = os.path.join(RECYCLE_DIR, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+            deleted_count += 1
+        
+        return {"message": f"Permanently deleted {deleted_count} items from recycle bin"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/recycle-bin/{recycled_name}")
+async def permanently_delete(recycled_name: str):
+    """Permanently delete a specific file from recycle bin"""
+    try:
+        recycle_path = os.path.join(RECYCLE_DIR, recycled_name)
+        meta_path = f"{recycle_path}.meta"
+        
+        if not os.path.exists(recycle_path):
+            raise HTTPException(status_code=404, detail="File not found in recycle bin")
+        
+        if os.path.isdir(recycle_path):
+            shutil.rmtree(recycle_path)
+        else:
+            os.remove(recycle_path)
+        
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
+        
+        return {"message": f"Permanently deleted {recycled_name}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Recent Files Endpoints
+@app.get("/recent-files")
+async def get_recent_files():
+    """Get list of recently accessed files"""
+    try:
+        recent_files = load_recent_files()
+        
+        # Filter out files that no longer exist
+        valid_files = []
+        for file_info in recent_files:
+            file_path = os.path.join(UPLOAD_DIR, file_info['path'])
+            if os.path.exists(file_path):
+                # Add current file stats
+                stats = os.stat(file_path)
+                file_info['size'] = stats.st_size
+                file_info['modified'] = stats.st_mtime
+                file_info['exists'] = True
+                valid_files.append(file_info)
+        
+        # Update the recent files list to remove non-existent files
+        if len(valid_files) != len(recent_files):
+            save_recent_files(valid_files)
+        
+        return {"recent_files": valid_files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/recent-files")
+async def clear_recent_files():
+    """Clear all recent files history"""
+    try:
+        save_recent_files([])
+        return {"message": "Recent files history cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
