@@ -12,14 +12,16 @@ This is a full-stack web application for file management with advanced features.
 Project: File Management System v2.0
 Stack: React + FastAPI + Docker
 Main Features: File operations, Recycle bin, Themes, Search, Bookmarks
-Development Path: /mnt/c/Users/JayTu/Projects/FileManagementServer/Program
+Repository Root: /mnt/c/Users/JayTu/Projects/FileManagementServer
+Working Directory: ./Program
 ```
 
 ## Essential Commands
 
 ### Start Development
 ```bash
-cd /mnt/c/Users/JayTu/Projects/FileManagementServer/Program
+cd /mnt/c/Users/JayTu/Projects/FileManagementServer
+cd Program
 docker-compose up -d
 ```
 
