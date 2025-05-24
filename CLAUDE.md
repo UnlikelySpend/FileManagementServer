@@ -269,6 +269,20 @@ git commit -m "feat: Add new feature"
 git push origin main
 ```
 
+## Important Repository Notes
+
+### Documentation Structure
+- **Root README.md** - Main project documentation (keep updated with version changes)
+- **Program/README.md** - Application-specific documentation
+- **IMPORTANT**: When updating version or features, update BOTH README files
+
+### GitHub Best Practices
+1. Always work from repository root for git operations
+2. Keep root-level docs (README.md, CLAUDE.md, CHANGELOG.md) in sync
+3. Application code lives in `/Program` directory
+4. Use conventional commits for clear history
+5. Tag releases with version numbers (e.g., v2.0.0)
+
 ---
 
 **Remember**: This project prioritizes user experience, clean code, and maintainability. Always test thoroughly and keep the UI intuitive and responsive.
