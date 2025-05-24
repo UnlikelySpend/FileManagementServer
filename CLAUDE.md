@@ -1,6 +1,27 @@
 # Claude AI Development Guide 🤖
 
-This document provides essential information for Claude AI to effectively work on and enhance this File Management System.
+This document provides essential information for Claude AI to effectively work on and enhance this File Management System. Based on v2.0 development experience, this guide includes specific optimizations and lessons learned.
+
+## ⚡ Quick Reference (Most Common Tasks)
+
+```bash
+# Fix black screen / frontend issues
+docker-compose restart frontend
+# Then clear browser cache (Ctrl+Shift+Delete)
+
+# Apply backend changes
+docker-compose restart backend
+
+# Full reset when things go wrong
+docker-compose down && docker-compose up --build -d
+
+# Check what's wrong
+docker-compose logs -f
+
+# Commit changes (from repository root!)
+cd /mnt/c/Users/JayTu/Projects/FileManagementServer
+git add . && git commit -m "feat: your message" && git push
+```
 
 ## Project Overview
 
@@ -14,7 +35,33 @@ Stack: React + FastAPI + Docker
 Main Features: File operations, Recycle bin, Themes, Search, Bookmarks
 Repository Root: /mnt/c/Users/JayTu/Projects/FileManagementServer
 Working Directory: ./Program
+Frontend Port: 5173 (NOT 3000!)
+Backend Port: 8000
+Critical Libraries: Chakra UI (limited icons!), React Icons, Vite
 ```
+
+## 🚨 Critical First Steps (Do This First!)
+
+1. **Check if containers are running:**
+   ```bash
+   cd /mnt/c/Users/JayTu/Projects/FileManagementServer/Program
+   docker-compose ps
+   ```
+
+2. **If not running or having issues:**
+   ```bash
+   docker-compose down
+   docker-compose up --build -d
+   ```
+
+3. **Verify application is accessible:**
+   - Frontend: http://localhost:5173 (NOT 3000!)
+   - Backend: http://localhost:8000/docs
+
+4. **Check for errors:**
+   ```bash
+   docker-compose logs -f
+   ```
 
 ## Essential Commands
 
@@ -120,25 +167,38 @@ Program/
    docker-compose restart frontend  # If frontend changed
    ```
 
-### Common Issues & Fixes
+### Common Issues & Fixes (Learned from v2.0 Development)
 
-1. **Import errors (Icon not found)**
-   - Chakra UI has limited icons
-   - Use react-icons instead: `import { FaPlay } from 'react-icons/fa'`
+1. **Import errors (Icon not found) - CRITICAL**
+   - ⚠️ Chakra UI has LIMITED icons - does NOT include: PauseIcon, PlayIcon, VolumeUpIcon
+   - ✅ Solution: Use react-icons: `import { FaPlay, FaPause } from 'react-icons/fa'`
+   - This caused black screen in v2.0 development!
 
-2. **Black screen**
-   - Check browser console for errors
-   - Clear browser cache (Ctrl+Shift+Delete)
-   - Restart frontend container
+2. **Black screen - Most Common Issue**
+   - First check: Browser console (F12) for import errors
+   - Clear browser cache: Ctrl+Shift+Delete
+   - Try incognito window
+   - Restart frontend: `docker-compose restart frontend`
+   - If using volumes, may need full rebuild: `docker-compose down && docker-compose up --build -d`
 
-3. **API not responding**
-   - Check backend logs: `docker-compose logs backend`
-   - Ensure CORS is configured correctly
-   - Verify API_URL in frontend
+3. **Changes not reflecting in container**
+   - Check docker-compose.yml has volume mapping:
+     ```yaml
+     volumes:
+       - ./frontend/src:/app/src  # This enables hot reload
+     ```
+   - Without this, need rebuild for every change
+   - Backend ALWAYS needs restart: `docker-compose restart backend`
 
-4. **Changes not reflecting**
-   - Frontend uses volume mapping - changes should be instant
-   - Backend requires restart: `docker-compose restart backend`
+4. **API 404 errors**
+   - New endpoints need backend restart
+   - Check if backend actually has the code: `docker-compose exec backend cat /app/main.py | grep "your-endpoint"`
+   - May need full rebuild if Dockerfile copies are cached
+
+5. **CSS Theme Issues**
+   - CSS custom properties must be initialized before use
+   - Use fallback colors: `color={useColorModeValue('blue.500', 'blue.200')}`
+   - Don't use `var(--theme-primary)` without initialization
 
 ## Best Practices
 
@@ -221,14 +281,43 @@ Low Priority:
 - Mobile app
 - Plugin system
 
-## Important Notes
+## Important Notes & Lessons Learned
 
-1. **Always use docker-compose** for development to ensure consistency
-2. **Theme colors** are stored as CSS custom properties
-3. **Clipboard operations** use browser limitations (no system clipboard access)
-4. **File paths** must be carefully handled to prevent directory traversal
-5. **Recent files** are stored in JSON file on backend
-6. **Bookmarks** are stored in browser localStorage
+### From v2.0 Development Experience:
+
+1. **Docker Volume Mapping is CRITICAL**
+   - Without `./frontend/src:/app/src` in docker-compose.yml, changes won't reflect
+   - We had to add this mid-development to avoid constant rebuilds
+   - Backend doesn't need volume mapping but ALWAYS needs restart
+
+2. **Icon Import Issues = Black Screen**
+   - This was our #1 issue in v2.0
+   - NEVER import non-existent Chakra UI icons
+   - Always use react-icons for Play, Pause, Volume, etc.
+   - Black screen? Check browser console first!
+
+3. **Browser Caching is Aggressive**
+   - Use Ctrl+Shift+Delete to clear cache
+   - Or use incognito window for testing
+   - Vite hot reload sometimes needs a manual refresh
+
+4. **Git Operations from Root**
+   - ALWAYS run git commands from repository root
+   - Update root README.md when version changes
+   - Keep documentation in sync (root and Program)
+
+5. **Testing After Changes**
+   - Frontend changes: Usually instant with volume mapping
+   - Backend changes: MUST restart container
+   - New endpoints: Full restart required
+   - Database/storage changes: Check file permissions
+
+6. **State Management**
+   - Theme colors: CSS custom properties + localStorage
+   - Clipboard: React Context (browser limitations)
+   - Recent files: Backend JSON file
+   - Bookmarks: Browser localStorage
+   - File paths: Always sanitize for security
 
 ## Quick Debugging
 
@@ -283,6 +372,32 @@ git push origin main
 4. Use conventional commits for clear history
 5. Tag releases with version numbers (e.g., v2.0.0)
 
+## ❌ What NOT to Do (Avoid These Mistakes)
+
+1. **DON'T import these Chakra UI icons:**
+   - PauseIcon, PlayIcon, VolumeUpIcon, VolumeDownIcon
+   - Use react-icons instead!
+
+2. **DON'T forget to restart containers:**
+   - Backend changes = restart required
+   - New npm packages = rebuild required
+
+3. **DON'T use port 3000:**
+   - Frontend is on port 5173 (Vite default)
+   - This isn't Create React App!
+
+4. **DON'T commit from Program directory:**
+   - Always use repository root for git operations
+   - Keep root docs updated
+
+5. **DON'T skip browser cache clearing:**
+   - When in doubt, clear cache or use incognito
+   - Vite sometimes holds onto old code
+
+6. **DON'T forget volume mapping:**
+   - Check docker-compose.yml has frontend volume
+   - Without it, you'll rebuild constantly
+
 ---
 
-**Remember**: This project prioritizes user experience, clean code, and maintainability. Always test thoroughly and keep the UI intuitive and responsive.
+**Remember**: This project prioritizes user experience, clean code, and maintainability. Always test thoroughly and keep the UI intuitive and responsive. When something goes wrong, check the browser console first!
